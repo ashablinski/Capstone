@@ -1,6 +1,6 @@
 # Capstone Project
 
-# CKME136 Data Analytics: Capstone Project
+CKME136 Data Analytics: Capstone Project
 
 This project showcases my Data Analytics skills via hands-on application in a project setting. 
 
