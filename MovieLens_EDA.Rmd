@@ -1,0 +1,166 @@
+---
+title: "MovieLens_EDA"
+author: "Art_Shablinski"
+date: "26/06/2020"
+---
+```{r, echo=FALSE}
+knitr::opts_chunk$set(error = TRUE)
+```
+
+#### Loading required packages using pacman:
+```{r}
+pacman::p_load(pacman, corrgram, lubridate, rmarkdown, rvest, XML, shiny, tidyverse, tidytext, stringr, splitstackshape, caTools)
+```
+
+
+#### Read the csv files in the folder:
+```{r}
+setwd("E:/DATA/MovieLens/ml-20m")
+getwd()
+memory.limit(size=56000)
+
+
+genome_scores <- read.csv(file = 'genome_scores.csv', header = T, na.strings = c(""))
+genome_tags <- read.csv(file = 'genome_tags.csv', header = T, na.strings = c(""))
+links <- read.csv(file = 'links.csv', header = T, na.strings = c(""))
+movies <- read.csv(file = 'movies.csv', header = T, na.strings = c(""))
+ratings <- read.csv(file = 'ratings.csv', header = T, na.strings = c(""))
+tags <- read.csv(file = 'tags.csv', header = T, na.strings = c(""))
+```
+
+#### Cleaning Data:
+```{r}
+glimpse(ratings)
+ratings <- ratings %>%
+  mutate(timestamp = as_datetime(timestamp))
+
+glimpse(tags)
+tags <- tags %>%
+  mutate(timestamp = as_datetime(timestamp))
+
+summary(ratings)
+
+summary(tags)
+
+movies <- movies %>%
+  # trim whitespaces
+  mutate(title = str_trim(title)) %>%
+  # split title to separate year into a separate column
+  extract(title, c("title_tmp", "year"), regex = "^(.*) \\(([0-9 \\-]*)\\)$", remove = F) %>%
+  # for series we will take debut dates instead
+  mutate(year = if_else(str_length(year) > 4, as.integer(str_split(year, "-", simplify = T)[1]), as.integer(year))) %>%
+  # replace title NA's with original title
+  mutate(title = if_else(is.na(title_tmp), title, title_tmp)) %>%
+  # drop title_tmp column
+  select(-title_tmp)  %>%
+  # turn (no genres listed) to NA
+  mutate(genres = if_else(genres == "(no genres listed)", `is.na<-`(genres), genres))
+
+head(movies)
+glimpse(movies)
+
+na_movies <- movies %>%
+  filter(is.na(title) | is.na(year))
+
+glimpse(na_movies)
+
+# remove movies with missing years
+movies <- movies[!is.na(movies$year), ]
+
+glimpse(movies)
+  
+glimpse(links)
+```
+
+#### Data Exploration:
+```{r}
+# Number of movies per year/decade
+movies_per_year <- movies %>%
+  na.omit() %>%
+  select(movieId, year) %>%
+  group_by(year) %>%
+  summarise(count = n())  %>%
+  arrange(year)
+
+print(movies_per_year)
+
+# fill missing years
+movies_per_year <- movies_per_year %>%
+  complete(year = full_seq(year, 1), fill = list(count = 0))
+
+print(movies_per_year)
+```
+
+#### Plot movies per year:
+```{r}
+movies_per_year %>%
+  ggplot(aes(x = year, y = count)) +
+  geom_line(color="red", size=0.8)
+```
+
+#### Most popular movie genres year by year:
+```{r}
+genres_df <- movies %>%
+  separate_rows(genres, sep = "\\|") %>%
+  group_by(genres) %>%
+  summarise(number = n()) %>%
+  arrange(desc(number))
+
+print(genres_df)
+```
+
+#### Genres popularity per year:
+```{r}
+genres_popularity <- movies %>%
+  na.omit() %>% # omit missing values
+  select(movieId, year, genres) %>% # select columns we are interested in
+  separate_rows(genres, sep = "\\|") %>% # separate genres into rows
+  mutate(genres = as.factor(genres)) %>% # turn genres in factors
+  group_by(year, genres) %>% # group data by year and genre
+  summarise(number = n()) %>% # count
+  complete(year = full_seq(year, 1), genres, fill = list(number = 0)) # add missing years/genres
+
+genres_popularity %>%
+  filter(year > 1930) %>%
+  filter(genres %in% c("Animation", "Sci-Fi", "Comedy", "Drama", "Horror")) %>%
+  ggplot(aes(x = year, y = number)) +
+    geom_line(aes(color=genres), size=0.7) + 
+    scale_fill_brewer(palette = "Paired")
+```
+#### To avoid introducing bias and unnecessary complexity we will drop timestamp columns:
+```{r}
+ratings$timestamp <- NULL
+tags$timestamp <- NULL
+```
+
+#### Merging Dataframes:
+```{r}
+# for use later
+genome <- left_join(genome_scores, genome_tags)
+
+# our main dataframe for the Autoencoder
+MovieLens <- left_join(ratings, movies)
+
+head(MovieLens, 30)
+tail(MovieLens, 30)
+
+summary(MovieLens)
+nrow(MovieLens)
+ncol(MovieLens)
+```
+
+### Splitting data frame into Training, Testing and Validation sets:
+```{r}
+require(caTools)
+set.seed(123) 
+sample = sample.split(ratings, SplitRatio = 0.70)
+train = subset(ratings, sample == TRUE)
+test  = subset(ratings, sample == FALSE)
+```
+
+### Saving final data frames accordingly:
+```{r}
+write.csv(train, file = "MovieLens_Training.csv", row.names = F)
+write.csv(test, file = "MovieLens_Testing.csv", row.names = F)
+```
+
